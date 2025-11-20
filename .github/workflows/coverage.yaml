@@ -1,0 +1,85 @@
+name: Fuzz Coverage
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "corpus/**"
+
+  schedule:
+    - cron: "0 3 * * *"  # Daily at 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout corpus repo
+        uses: actions/checkout@v4
+
+      - name: Checkout fuzz targets repo
+        uses: actions/checkout@v4
+        with:
+          repository: stratum-mining/stratum
+          path: stratum 
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          profile: minimal
+          toolchain: nightly
+          override: true
+          components: llvm-tools-preview
+
+      - name: Add Rust LLVM tools to PATH
+        run: |
+          LLVM_TOOLS=$(rustc +nightly --print sysroot)/lib/rustlib/$(rustc --print host-tuple)/bin
+          echo "$LLVM_TOOLS" >> $GITHUB_PATH
+          ls -al "$LLVM_TOOLS" 
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Copy corpus into fuzz targets repo
+        run: |
+          mkdir -p stratum/fuzz/corpus
+          mv corpus/* stratum/fuzz/corpus
+
+      - name: Run fuzz coverage
+        run: |
+          chmod +x ./scripts/fuzz_coverage.sh
+          cp ./scripts/fuzz_coverage.sh stratum/fuzz_coverage.sh
+          cd stratum/
+          ls fuzz/
+          ./fuzz_coverage.sh
+
+      - name: Move coverage results into this repo
+        run: |
+          rm -rf coverage
+          mkdir -p coverage
+          cp -r stratum/coverage_html coverage/
+
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: coverage/coverage_html
+
+  deploy:
+    needs: coverage
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
+
